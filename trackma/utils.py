@@ -21,7 +21,7 @@ import json
 import difflib
 import cPickle as pickle
 
-VERSION = '0.3'
+VERSION = '0.4'
 
 datadir = os.path.dirname(__file__)
 LOGIN_PASSWD = 1
@@ -232,10 +232,10 @@ config_defaults = {
     'player': 'mpv',
     'searchdir': '/home/user/Videos',
     'tracker_enabled': True,
-    'tracker_update_wait': 5,
+    'tracker_update_wait_s': 120,
     'tracker_update_close': False,
     'tracker_update_prompt': False,
-    'tracker_interval': 30,
+    'tracker_interval': 10,
     'tracker_process': 'mplayer|mplayer2|mpv',
     'autoretrieve': 'days',
     'autoretrieve_days': 3,

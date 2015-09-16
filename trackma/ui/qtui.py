@@ -405,7 +405,6 @@ class Trackma(QtGui.QMainWindow):
         for status in statuses_nums:
             self._rebuild_list(status, filtered_list[status], altnames, library)
 
-
     def _rebuild_list(self, status, showlist=None, altnames=None, library=None):
         if not showlist:
             showlist = self.worker.engine.filter_list(status)
@@ -504,27 +503,8 @@ class Trackma(QtGui.QMainWindow):
 
         return None
 
-    ### Slots
-    def s_hide(self):
-        if self.isVisible():
-            self.was_maximized = self.isMaximized()
-            self.hide()
-        else:
-            self.setGeometry(self.geometry())
-            if self.was_maximized:
-                self.showMaximized()
-            else:
-                self.show()
-
-    def s_tray_clicked(self, reason):
-        if reason == QtGui.QSystemTrayIcon.Trigger:
-            self.s_hide()
-
-    def s_busy(self):
-        self._enable_widgets(False)
-
-    def s_show_selected(self, new, old=None):
-        if not new:
+    def _select_show(self, show):
+        if not show:
             # Unselect any show
             self.selected_show_id = None
 
@@ -542,25 +522,15 @@ class Trackma(QtGui.QMainWindow):
             self.show_play_next_btn.setEnabled(False)
             return
 
-        index = new.row()
-        selected_id = self.notebook.currentWidget().item( index, 0 ).text()
-
-        # Attempt to convert to int if possible
-        try:
-            selected_id = int(selected_id)
-        except ValueError:
-            selected_id = str(selected_id)
-
-        show = self.worker.engine.get_show_info(selected_id)
-
         # Block signals
         self.show_status.blockSignals(True)
 
         # Set proper ranges
         if show['total']:
-            self.show_progress.setRange(0, show['total'])
+            self.show_progress.setMaximum(show['total'])
+            self.show_progress_bar.setMaximum(show['total'])
         else:
-            self.show_progress.setRange(0, 5000)
+            self.show_progress.setMaximum(5000)
 
         # Update information
         self.show_title.setText(show['title'])
@@ -597,15 +567,50 @@ class Trackma(QtGui.QMainWindow):
                     self.show_image.setText('Not available')
 
         if show['total'] > 0:
-            self.show_progress_bar.setValue( 100L * show['my_progress'] / show['total'] )
+            self.show_progress_bar.setValue( show['my_progress'] )
         else:
             self.show_progress_bar.setValue( 0 )
 
         # Make it global
-        self.selected_show_id = selected_id
+        self.selected_show_id = show['id']
 
         # Unblock signals
         self.show_status.blockSignals(False)
+
+    ### Slots
+    def s_hide(self):
+        if self.isVisible():
+            self.was_maximized = self.isMaximized()
+            self.hide()
+        else:
+            self.setGeometry(self.geometry())
+            if self.was_maximized:
+                self.showMaximized()
+            else:
+                self.show()
+
+    def s_tray_clicked(self, reason):
+        if reason == QtGui.QSystemTrayIcon.Trigger:
+            self.s_hide()
+
+    def s_busy(self):
+        self._enable_widgets(False)
+
+    def s_show_selected(self, new, old=None):
+        if new:
+            index = new.row()
+            selected_id = self.notebook.currentWidget().item( index, 0 ).text()
+
+            # Attempt to convert to int if possible
+            try:
+                selected_id = int(selected_id)
+            except ValueError:
+                selected_id = str(selected_id)
+
+            show = self.worker.engine.get_show_info(selected_id)
+            self._select_show(show)
+        else:
+            self._select_show(None)
 
     def s_download_image(self):
         show = self.worker.engine.get_show_info(self.selected_show_id)
@@ -624,13 +629,11 @@ class Trackma(QtGui.QMainWindow):
     def s_plus_episode(self):
         self._busy(True)
         self.worker_call('set_episode', self.r_generic, self.selected_show_id, self.show_progress.value()+1)
-        self.show_progress.setValue(self.show_progress.value()+1)
 
     def s_rem_episode(self):
-        ##self._busy(True)
         if not self.show_progress.value() <= 0:
+            self._busy(True)
             self.worker_call('set_episode', self.r_generic, self.selected_show_id, self.show_progress.value()-1)
-            self.show_progress.setValue(self.show_progress.value()-1)
 
     def s_set_episode(self):
         self._busy(True)
@@ -741,6 +744,7 @@ class Trackma(QtGui.QMainWindow):
         QtGui.QMessageBox.about(self, 'About Trackma-qt %s' % utils.VERSION,
             '<p><b>About Trackma-qt %s</b></p><p>Trackma is an open source client for media tracking websites.</p>'
             '<p>This program is licensed under the GPLv3, for more information read COPYING file.</p>'
+            '<p>Thanks to all contributors. To see all contributors see AUTHORS file.</p>'
             '<p>Copyright (C) z411 - Icon by shuuichi</p>'
             '<p><a href="http://github.com/z411/trackma">http://github.com/z411/trackma</a></p>' % utils.VERSION)
 
@@ -766,9 +770,12 @@ class Trackma(QtGui.QMainWindow):
             self._update_row(widget, row, show, altname, library.get(show['id']), is_playing)
             widget.setSortingEnabled(True)
 
+            if show['id'] == self.selected_show_id:
+                self._select_show(show)
+
             if is_playing and self.config['show_tray'] and self.config['notifications']:
                 if episode == (show['my_progress'] + 1):
-                    delay = self.worker.engine.get_config('tracker_update_wait')
+                    delay = self.worker.engine.get_config('tracker_update_wait_s')
                     self.tray.showMessage('Trackma Tracker', "Playing %s %s. Will update in %d minutes." % (show['title'], episode, delay))
 
     def ws_changed_list(self, show, old_status=None):
@@ -1188,7 +1195,7 @@ class SettingsDialog(QtGui.QDialog):
         g_media_layout.addRow( 'Process name (regex)', self.tracker_process )
         g_media_layout.addRow( 'Plex host', self.plex_host )
         g_media_layout.addRow( 'Plex port', self.plex_port )
-        g_media_layout.addRow( 'Wait before updating (minutes)', self.tracker_update_wait )
+        g_media_layout.addRow( 'Wait before updating (seconds)', self.tracker_update_wait )
         g_media_layout.addRow( 'Wait until the player is closed', self.tracker_update_close )
         g_media_layout.addRow( 'Ask before updating', self.tracker_update_prompt )
 
@@ -1350,7 +1357,7 @@ class SettingsDialog(QtGui.QDialog):
         self.tracker_enabled.setChecked(engine.get_config('tracker_enabled'))
         self.tracker_interval.setValue(engine.get_config('tracker_interval'))
         self.tracker_process.setText(engine.get_config('tracker_process'))
-        self.tracker_update_wait.setValue(engine.get_config('tracker_update_wait'))
+        self.tracker_update_wait.setValue(engine.get_config('tracker_update_wait_s'))
         self.tracker_update_close.setChecked(engine.get_config('tracker_update_close'))
         self.tracker_update_prompt.setChecked(engine.get_config('tracker_update_prompt'))
 
@@ -1412,7 +1419,7 @@ class SettingsDialog(QtGui.QDialog):
         engine.set_config('tracker_enabled',       self.tracker_enabled.isChecked())
         engine.set_config('tracker_interval',      self.tracker_interval.value())
         engine.set_config('tracker_process',       str(self.tracker_process.text()))
-        engine.set_config('tracker_update_wait',   self.tracker_update_wait.value())
+        engine.set_config('tracker_update_wait_s',   self.tracker_update_wait.value())
         engine.set_config('tracker_update_close',  self.tracker_update_close.isChecked())
         engine.set_config('tracker_update_prompt', self.tracker_update_prompt.isChecked())
 
